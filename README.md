@@ -9,14 +9,7 @@ MCP server for tracking and analyzing gameplay questers across Immutable games u
 python3 server.py
 ```
 
-### Run Standalone Scripts
-```bash
-# Run weekly decomposition model
-python3 decomposition.py
-
-# Run PM/CG summary
-python3 weekly_summary.py
-```
+The server exposes resources (context) and prompts (analysis workflows) for Phase 0-3 analysis.
 
 ## Features
 
@@ -43,23 +36,9 @@ python3 weekly_summary.py
 - 📉 Declining quests (trending downwards)
 - ⚠️ Engagement issues
 
-### 2. Standalone Scripts
+### 2. Quest Health Monitoring
 
-**Weekly Decomposition (`decomposition.py`)**
-```
-Total Δ = [New Games] + [Discontinued Games] + [Continuing Games]
-```
-
-**Weekly Summary (`weekly_summary.py`)**
-PM-ready table with all active games:
-- Questers WoW comparison
-- Quest availability (in-game quests)
-- Bot % by game
-- Key drivers
-
-### 3. Quest Health Monitoring
-
-**Quest Alerts Dashboard (`quest_alerts_enhanced.sql`)**
+**Quest Alerts Dashboard (Phase 3)**
 Identifies problematic quests at scale:
 - Bot % per quest
 - Completions per user (grinding indicator)
@@ -88,12 +67,13 @@ AND g.plan_name != 'Maintenance'
 
 | File | Purpose |
 |------|---------|
-| `decomposition.py` | Metric decomposition model |
-| `weekly_summary.py` | PM/CG weekly summary |
 | `server.py` | MCP server entry point |
-| `prompts.py` | Analysis prompts |
-| `resources.py` | Context and definitions |
+| `prompts.py` | Analysis prompts (Phase 0-3 workflows) |
+| `resources.py` | Context and definitions (loads SQL from files) |
 | `tools.py` | BigQuery query tool |
+| `phase0_team_okr.sql` | Phase 0 SQL query (Team OKR snapshot) |
+| `quest_alerts_enhanced.sql` | Phase 3 SQL query (Quest audit with alerts) |
+| `requirements.txt` | Python dependencies |
 
 ## Setup
 
@@ -107,10 +87,9 @@ pip install -r requirements.txt
 gcloud auth application-default login
 ```
 
-3. Run scripts:
+3. Run the MCP server:
 ```bash
-python3 decomposition.py
-python3 weekly_summary.py
+python3 server.py
 ```
 
 ## MCP Server Usage
@@ -172,8 +151,9 @@ def weekly_questers_report():
 ```
 
 ### Option 2: Reference SQL Files
-Share the SQL reference file directly:
-- `quest_alerts_enhanced.sql` - Complete Phase 3 quest audit query
+Share the SQL files directly for your team's BigQuery integration:
+- `phase0_team_okr.sql` - Phase 0: Team OKR snapshot (30-day quota attainment)
+- `quest_alerts_enhanced.sql` - Phase 3: Quest audit with automated alerts
 
 ### Option 3: Run as Separate MCP Server
 Keep as standalone server and reference from your main MCP using MCP-to-MCP communication.

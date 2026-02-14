@@ -1,6 +1,18 @@
 """
 Resources - Context for the AI to understand tables and definitions
 """
+import os
+from pathlib import Path
+
+# Get the directory containing this file
+_SCRIPT_DIR = Path(__file__).parent
+
+
+def _load_sql(filename: str) -> str:
+    """Load SQL content from a file"""
+    sql_path = _SCRIPT_DIR / filename
+    with open(sql_path, 'r') as f:
+        return f.read().strip()
 
 DEFINITIONS = """# Quester Definitions
 
@@ -714,7 +726,11 @@ After presenting quest-level data, ask:
 """
 
 
-PHASE0_TEAM_OKR = """# Phase 0: Team OKR Overview
+def _get_phase0_team_okr_content() -> str:
+    """Generate Phase 0 Team OKR documentation with SQL loaded from file"""
+    sql_query = _load_sql('phase0_team_okr.sql')
+    
+    return f"""# Phase 0: Team OKR Overview
 
 ## Purpose
 Show team-level portfolio health via 30-day rolling quota attainment before weekly trend analysis.
@@ -789,95 +805,7 @@ Then continue to Phase 1.
 ## Reference SQL Query
 
 ```sql
-WITH last_30d_questers AS (
-  -- Calculate distinct gameplay questers per game (last 30 days)
-  SELECT 
-    g.game_name,
-    g.plan_name as tier,
-    g.account_manager_name as am,
-    g.monthly_gameplay_target as target,
-    COUNT(DISTINCT e.visitor_id) as actual_questers_30d,
-    COUNT(DISTINCT q.quest_id) as gameplay_quests,
-    -- Count non-testing gameplay quests
-    COUNT(DISTINCT CASE 
-      WHEN NOT EXISTS (
-        SELECT 1 FROM UNNEST(q.quest_category) AS cat 
-        WHERE LOWER(cat) LIKE '%testing%'
-      ) THEN q.quest_id 
-    END) as non_testing_quests
-  FROM `app_immutable_play.event` e
-  INNER JOIN `app_immutable_play.visitor` v ON e.visitor_id = v.visitor_id
-  LEFT JOIN `app_immutable_play.quest` q ON e.quest_id = q.quest_id
-  LEFT JOIN `app_immutable_play.game` g ON q.game_id = g.game_id
-  LEFT JOIN UNNEST(q.quest_category) AS category
-  WHERE 
-    e.event_ts >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
-    AND v.is_front_end_cohort = TRUE
-    AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
-    AND g.game_name NOT IN ('Guild of Guardians', 'Gods Unchained')
-    AND g.plan_name != 'Maintenance'
-    AND g.active_subscription = TRUE
-    AND category LIKE '%gameplay%'
-    AND g.monthly_gameplay_target IS NOT NULL  -- Only games with targets
-  GROUP BY 1,2,3,4
-  HAVING COUNT(DISTINCT e.visitor_id) >= 10  -- Filter: At least 10 questers
-),
-
-quota_status AS (
-  SELECT 
-    game_name,
-    tier,
-    am,
-    actual_questers_30d,
-    target,
-    ROUND(100.0 * actual_questers_30d / NULLIF(target, 0), 1) as pct_of_quota,
-    actual_questers_30d - target as gap,
-    gameplay_quests,
-    non_testing_quests,
-    CASE 
-      WHEN actual_questers_30d >= target THEN 1 
-      ELSE 0 
-    END as meeting_quota
-  FROM last_30d_questers
-  WHERE non_testing_quests > 0  -- Filter: Must have at least 1 non-testing gameplay quest
-)
-
--- For overall summary:
-SELECT 
-  SUM(meeting_quota) as games_meeting_quota,
-  COUNT(*) as total_games,
-  ROUND(100.0 * SUM(meeting_quota) / COUNT(*), 1) as pct_meeting
-FROM quota_status;
-
--- For tier breakdown:
-SELECT 
-  tier,
-  SUM(meeting_quota) as games_meeting_quota,
-  COUNT(*) as total_games,
-  ROUND(100.0 * SUM(meeting_quota) / COUNT(*), 1) as pct_meeting
-FROM quota_status
-GROUP BY tier
-ORDER BY 
-  CASE tier
-    WHEN 'Ultra Boost' THEN 1
-    WHEN 'Boost' THEN 2
-    WHEN 'Core' THEN 3
-  END;
-
--- For below-quota table:
-SELECT 
-  game_name,
-  tier,
-  COALESCE(am, 'Unassigned') as account_manager,
-  actual_questers_30d,
-  target as monthly_target,
-  pct_of_quota,
-  gap,
-  gameplay_quests,
-  non_testing_quests
-FROM quota_status
-WHERE meeting_quota = 0  -- Only games below quota
-ORDER BY pct_of_quota ASC, tier, game_name;
+{sql_query}
 ```
 
 ## Edge Cases
@@ -904,7 +832,15 @@ If game created <30 days ago:
 """
 
 
-QUEST_ALERTS_ENHANCED = """# Quest Alerts Dashboard - Enhanced (Phase 3 Reference)
+# Cache the content so we don't read from file multiple times
+PHASE0_TEAM_OKR = _get_phase0_team_okr_content()
+
+
+def _get_quest_alerts_enhanced_content() -> str:
+    """Generate Quest Alerts Enhanced documentation with SQL loaded from file"""
+    sql_query = _load_sql('quest_alerts_enhanced.sql')
+    
+    return f"""# Quest Alerts Dashboard - Enhanced (Phase 3 Reference)
 
 This is the **complete implementation** of the Phase 3 quest audit system with automated alert flags.
 
@@ -954,204 +890,7 @@ Identify problematic quests at scale:
 ## Full SQL Query
 
 ```sql
--- Enhanced Quest Dashboard with Alert Flags
--- Flags potentially broken quests and high botting quests for account managers
-
-WITH quest_activity AS (
-  SELECT 
-    g.game_name,
-    g.plan_name,
-    g.account_manager_name,
-    q.quest_id,
-    q.quest_name,
-    q.quest_description,
-    q.valid_to,
-    q.quest_category,
-    COUNT(*) as total_completions_l30d,
-    COUNT(DISTINCT e.visitor_id) as distinct_users_l30d,
-    COUNT(DISTINCT CASE WHEN s.bot_score = 1 THEN e.visitor_id END) as bot_users,
-    MAX(e.event_ts) as latest_completion,
-    
-    -- Last 48 hours activity
-    COUNT(DISTINCT CASE 
-      WHEN e.event_ts >= TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 48 HOUR)) 
-      THEN e.visitor_id 
-    END) as users_48h,
-
-    COUNT(CASE 
-      WHEN e.event_ts >= TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 48 HOUR)) 
-      THEN 1 
-    END) as completions_48h,
-    
-    -- Previous 48 hours (48-96h ago)
-    COUNT(DISTINCT CASE 
-      WHEN e.event_ts >= TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 96 HOUR))
-        AND e.event_ts < TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 48 HOUR))
-      THEN e.visitor_id 
-    END) as users_prev_48h,
-    
-    COUNT(CASE 
-      WHEN e.event_ts >= TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 96 HOUR))
-        AND e.event_ts < TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 48 HOUR))
-      THEN 1 
-    END) as completions_prev_48h,
-    
-    -- Last 7 days activity
-    COUNT(CASE 
-      WHEN e.event_ts >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)) 
-      THEN 1 
-    END) as completions_7d,
-    
-    -- Previous 7 days (7-14 days ago)
-    COUNT(CASE 
-      WHEN e.event_ts >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY))
-        AND e.event_ts < TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY))
-      THEN 1 
-    END) as completions_prev_7d
-    
-  FROM `prod-im-data.app_immutable_play.event` e
-  LEFT JOIN `prod-im-data.app_immutable_play.visitor` v ON e.visitor_id = v.visitor_id
-  LEFT JOIN `prod-im-data.app_immutable_play.quest` q ON e.quest_id = q.quest_id
-  LEFT JOIN `prod-im-data.app_immutable_play.game` g ON q.game_id = g.game_id
-  LEFT JOIN `prod-im-data.mod_imx.sybil_score` s ON v.user_id = s.user_id
-  
-  WHERE e.event_ts >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
-    AND v.is_front_end_cohort = TRUE 
-    AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
-    AND g.game_name NOT IN ('Guild of Guardians', 'Gods Unchained')
-    AND g.plan_name IN ('Core', 'Boost', 'Ultra Boost', 'Maintenance')
-    AND q.quest_id IS NOT NULL
-    AND g.active_subscription IS TRUE
-    AND (q.valid_to IS NULL OR DATE(q.valid_to) >= CURRENT_DATE())
-    
-  GROUP BY 1,2,3,4,5,6,7,8
-),
-
-quest_metrics AS (
-  SELECT 
-    game_name,
-    plan_name,
-    account_manager_name,
-    quest_id,
-    quest_name,
-    quest_description,
-    valid_to,
-    ARRAY_TO_STRING(quest_category, ', ') as categories,
-    total_completions_l30d,
-    distinct_users_l30d,
-    bot_users,
-    ROUND(100.0 * bot_users / NULLIF(distinct_users_l30d, 0), 1) as bot_rate_pct,
-    latest_completion,
-    users_48h,
-    completions_48h,
-    users_prev_48h,
-    completions_prev_48h,
-    completions_7d,
-    completions_prev_7d,
-
-    ROUND(total_completions_l30d / NULLIF(distinct_users_l30d, 0), 1) as completions_per_user,
-    DATE_DIFF(CURRENT_DATE(), DATE(latest_completion), DAY) as days_since_last_completion,
-    TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), latest_completion, HOUR) as hours_since_last_completion,
-    
-    -- Calculate activity drop percentage
-    CASE 
-      WHEN users_prev_48h > 0 
-      THEN ROUND(100.0 * (users_prev_48h - users_48h) / users_prev_48h, 1)
-      ELSE 0 
-    END as activity_drop_pct,
-    
-    -- Calculate 7-day trend (completions drop percentage)
-    CASE 
-      WHEN completions_prev_7d > 0 
-      THEN ROUND(100.0 * (completions_prev_7d - completions_7d) / completions_prev_7d, 1)
-      ELSE 0 
-    END as completions_7d_drop_pct,
-    
-    -- Check if gameplay quest
-    CASE 
-      WHEN ARRAY_TO_STRING(quest_category, ', ') LIKE '%gameplay%' 
-      THEN 'Gameplay' 
-      ELSE 'Social/Other' 
-    END as quest_type
-  
-  FROM quest_activity
-  WHERE DATE(latest_completion) >= DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY)
-)
-
--- Final output with alert flags for Account Managers
-SELECT 
-  game_name,
-  plan_name,
-  COALESCE(account_manager_name, 'Unassigned') as account_manager,
-  quest_name,
-  quest_description,
-  valid_to,
-  categories,
-  
-  -- ALERT FLAG FOR ACCOUNT MANAGERS
-  CASE
-    WHEN bot_rate_pct >= 90 THEN '🔴 CRITICAL BOT RATE'
-    WHEN bot_rate_pct >= 80 THEN '🔴 HIGH BOT RATE'
-    WHEN completions_per_user > 20 AND users_48h >= 10 THEN '🔴 EXCESSIVE FARMING'
-    WHEN completions_7d = 0 AND completions_prev_7d > 10 THEN '⚠️ NO COMPLETIONS LAST 7D'
-    WHEN bot_rate_pct >= 70 THEN '🟡 ELEVATED BOT RATE'
-    WHEN completions_per_user > 10 AND users_48h >= 10 THEN '🟡 HIGH FARMING'
-    WHEN completions_48h = 0 AND completions_prev_48h > 5 AND hours_since_last_completion <= 96 THEN '⚠️ POSSIBLY BROKEN'
-    WHEN activity_drop_pct > 70 AND users_prev_48h >= 10 THEN '⚠️ MAJOR ACTIVITY DROP'
-    WHEN completions_7d_drop_pct > 25 AND completions_prev_7d >= 20 THEN '📉 TRENDING DOWNWARDS'
-    WHEN users_48h < 5 AND users_prev_48h >= 20 AND hours_since_last_completion <= 96 THEN '⚠️ LOW RECENT ACTIVITY'
-    WHEN hours_since_last_completion > 48 AND hours_since_last_completion <= 168 AND users_prev_48h > 0 THEN '⚠️ NO RECENT COMPLETIONS'
-    ELSE '✅ No Issues'
-  END as alert_flag,
-  
-  -- DETAILED ALERT MESSAGE FOR AM CONTEXT
-  CASE
-    WHEN bot_rate_pct >= 90 THEN CONCAT(CAST(ROUND(bot_rate_pct, 0) AS STRING), '% bots (', CAST(bot_users AS STRING), '/', CAST(distinct_users_l30d AS STRING), ' users) - URGENT ACTION NEEDED')
-    WHEN bot_rate_pct >= 80 THEN CONCAT(CAST(ROUND(bot_rate_pct, 0) AS STRING), '% bots (', CAST(bot_users AS STRING), '/', CAST(distinct_users_l30d AS STRING), ' users) - Review quest rewards/requirements')
-    WHEN completions_per_user > 20 AND users_48h >= 10 THEN CONCAT(CAST(ROUND(completions_per_user, 1) AS STRING), 'x completions per user - Quest may be too easy to farm')
-    WHEN completions_7d = 0 AND completions_prev_7d > 10 THEN CONCAT('0 completions in last 7 days (was ', CAST(completions_prev_7d AS STRING), ' in prev 7d) - CHECK IF QUEST IS BROKEN')
-    WHEN bot_rate_pct >= 70 THEN CONCAT(CAST(ROUND(bot_rate_pct, 0) AS STRING), '% bots - Monitor closely')
-    WHEN completions_per_user > 10 AND users_48h >= 10 THEN CONCAT(CAST(ROUND(completions_per_user, 1) AS STRING), 'x completions per user - Monitor for farming')
-    WHEN completions_48h = 0 AND completions_prev_48h > 5 THEN CONCAT('0 completions in 48h (was ', CAST(completions_prev_48h AS STRING), ' prev 48h) - Possible issue')
-    WHEN activity_drop_pct > 70 AND users_prev_48h >= 10 THEN CONCAT(CAST(ROUND(activity_drop_pct, 0) AS STRING), '% drop: ', CAST(users_prev_48h AS STRING), '→', CAST(users_48h AS STRING), ' users - Investigate cause')
-    WHEN completions_7d_drop_pct > 25 AND completions_prev_7d >= 20 THEN CONCAT(CAST(ROUND(completions_7d_drop_pct, 0) AS STRING), '% decline: ', CAST(completions_prev_7d AS STRING), '→', CAST(completions_7d AS STRING), ' completions (7d trend)')
-    WHEN users_48h < 5 AND users_prev_48h >= 20 THEN CONCAT('Only ', CAST(users_48h AS STRING), ' users in 48h (was ', CAST(users_prev_48h AS STRING), ') - Low engagement')
-    WHEN hours_since_last_completion > 48 AND hours_since_last_completion <= 168 THEN CONCAT('Last completion ', CAST(ROUND(hours_since_last_completion, 0) AS STRING), 'h ago - Check quest status')
-    ELSE 'Quest operating normally'
-  END as alert_message,
-  
-  -- PRIORITY LEVEL (1=Urgent, 2=High, 3=Medium, 4=Low, 5=No Issue)
-  CASE
-    WHEN bot_rate_pct >= 90 THEN 1
-    WHEN bot_rate_pct >= 80 THEN 2
-    WHEN (completions_per_user > 20 AND users_48h >= 10) THEN 2
-    WHEN (completions_48h = 0 AND completions_prev_48h > 5 AND hours_since_last_completion <= 96) THEN 2
-    WHEN (completions_7d = 0 AND completions_prev_7d > 10) THEN 2
-    WHEN bot_rate_pct >= 70 THEN 3
-    WHEN (completions_per_user > 10 AND users_48h >= 10) THEN 3
-    WHEN (activity_drop_pct > 70 AND users_prev_48h >= 10) THEN 3
-    WHEN (completions_7d_drop_pct > 25 AND completions_prev_7d >= 20) THEN 3
-    WHEN (users_48h < 5 AND users_prev_48h >= 20 AND hours_since_last_completion <= 96) THEN 4
-    WHEN (hours_since_last_completion > 48 AND hours_since_last_completion <= 168 AND users_prev_48h > 0) THEN 4
-    ELSE 5
-  END as alert_priority,
-  
-  -- Metrics
-  total_completions_l30d,
-  distinct_users_l30d,
-  bot_users,
-  bot_rate_pct,
-  latest_completion,
-  users_48h,
-  completions_48h,
-  completions_per_user,
-  completions_7d,
-  completions_prev_7d,
-  days_since_last_completion,
-  hours_since_last_completion
-
-FROM quest_metrics
-ORDER BY alert_priority, bot_rate_pct DESC, total_completions_l30d DESC;
+{sql_query}
 ```
 
 ## Usage Notes
@@ -1178,6 +917,10 @@ ORDER BY alert_priority, bot_rate_pct DESC, total_completions_l30d DESC;
 - Weekly quest health audit for all games
 - When PM/CG asks "Why did this game's questers drop?"
 """
+
+
+# Cache the content so we don't read from file multiple times
+QUEST_ALERTS_ENHANCED = _get_quest_alerts_enhanced_content()
 
 
 def register(mcp):
