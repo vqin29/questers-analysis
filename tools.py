@@ -9,7 +9,12 @@ bq_client = bigquery.Client()
 
 
 def register(mcp):
-    """Register all tools with the MCP server"""
+    """
+    Register all tools with the MCP server.
+    
+    Tools registered:
+    - query_bigquery: Execute SQL queries against BigQuery with safety checks
+    """
     
     @mcp.tool()
     def query_bigquery(sql: str) -> str:
@@ -36,7 +41,15 @@ def register(mcp):
                 }, indent=2)
         
         try:
-            results = bq_client.query(sql).result()
+            # Configure query with safety limits
+            job_config = bigquery.QueryJobConfig(
+                maximum_bytes_billed=10_000_000_000  # 10 GB limit to prevent runaway costs
+            )
+            
+            # Execute query with timeout
+            query_job = bq_client.query(sql, job_config=job_config)
+            results = query_job.result(timeout=300)  # 5 minute timeout
+            
             rows = []
             for row in results:
                 row_dict = {}

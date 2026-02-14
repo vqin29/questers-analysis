@@ -52,17 +52,17 @@ WITH quest_activity AS (
       THEN 1 
     END) as completions_prev_7d
     
-  FROM `prod-im-data.app_immutable_play.event` e
-  LEFT JOIN `prod-im-data.app_immutable_play.visitor` v ON e.visitor_id = v.visitor_id
-  LEFT JOIN `prod-im-data.app_immutable_play.quest` q ON e.quest_id = q.quest_id
-  LEFT JOIN `prod-im-data.app_immutable_play.game` g ON q.game_id = g.game_id
-  LEFT JOIN `prod-im-data.mod_imx.sybil_score` s ON v.user_id = s.user_id
+  FROM `app_immutable_play.event` e
+  LEFT JOIN `app_immutable_play.visitor` v ON e.visitor_id = v.visitor_id
+  LEFT JOIN `app_immutable_play.quest` q ON e.quest_id = q.quest_id
+  LEFT JOIN `app_immutable_play.game` g ON q.game_id = g.game_id
+  LEFT JOIN `mod_imx.sybil_score` s ON v.user_id = s.user_id
   
   WHERE e.event_ts >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
     AND v.is_front_end_cohort = TRUE 
     AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
     AND g.game_name NOT IN ('Guild of Guardians', 'Gods Unchained')
-    AND g.plan_name IN ('Core', 'Boost', 'Ultra Boost', 'Maintenance')  -- Active subscriptions only
+    AND g.plan_name IN ('Core', 'Boost', 'Ultra Boost', 'Maintenance')  -- Include Maintenance for Phase 3 alerts (flags issues to CG team)
     AND q.quest_id IS NOT NULL
     AND g.active_subscription IS TRUE
     
@@ -127,12 +127,13 @@ SELECT
   categories,
   
   -- 🚨 NEW: ALERT FLAG FOR ACCOUNT MANAGERS
+  -- Thresholds based on historical analysis and operational experience
   CASE
-    -- Critical bot rate (>90%)
+    -- Critical bot rate (>90%): Indicates systematic botting requiring immediate action
     WHEN bot_rate_pct >= 90 THEN '🔴 CRITICAL BOT RATE'
-    -- High bot rate (80-90%)
+    -- High bot rate (80-90%): Strong bot signal, needs investigation
     WHEN bot_rate_pct >= 80 THEN '🔴 HIGH BOT RATE'
-    -- Excessive farming/grinding (>20 completions per user)
+    -- Excessive farming/grinding (>20 completions per user): Quest rewards likely imbalanced
     WHEN completions_per_user > 20 
       AND users_48h >= 10
       THEN '🔴 EXCESSIVE FARMING'
@@ -140,22 +141,22 @@ SELECT
     WHEN completions_7d = 0 
       AND completions_prev_7d > 10
       THEN '⚠️ NO COMPLETIONS LAST 7D'
-    -- Elevated bot rate (70-80%)
+    -- Elevated bot rate (70-80%): Monitor for potential bot growth
     WHEN bot_rate_pct >= 70 THEN '🟡 ELEVATED BOT RATE'
-    -- High farming (10-20 completions per user)
+    -- High farming (10-20 completions per user): Above normal engagement, monitor trends
     WHEN completions_per_user > 10 
       AND users_48h >= 10
       THEN '🟡 HIGH FARMING'
-    -- Possibly broken (0 completions in 48h but had activity before)
+    -- Possibly broken (0 completions in 48h but had activity before): Quest may have stopped working
     WHEN completions_48h = 0 
       AND completions_prev_48h > 5 
       AND hours_since_last_completion <= 96 
       THEN '⚠️ POSSIBLY BROKEN'
-    -- Major activity drop (>70% decline)
+    -- Major activity drop (>70% decline): Significant engagement drop requires investigation
     WHEN activity_drop_pct > 70 
       AND users_prev_48h >= 10 
       THEN '⚠️ MAJOR ACTIVITY DROP'
-    -- Trending downwards (>25% drop in completions over 7 days)
+    -- Trending downwards (>25% drop in completions over 7 days): Negative trend indicator
     WHEN completions_7d_drop_pct > 25 
       AND completions_prev_7d >= 20
       THEN '📉 TRENDING DOWNWARDS'

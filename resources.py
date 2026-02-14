@@ -1,7 +1,6 @@
 """
 Resources - Context for the AI to understand tables and definitions
 """
-import os
 from pathlib import Path
 
 # Get the directory containing this file
@@ -11,8 +10,13 @@ _SCRIPT_DIR = Path(__file__).parent
 def _load_sql(filename: str) -> str:
     """Load SQL content from a file"""
     sql_path = _SCRIPT_DIR / filename
-    with open(sql_path, 'r') as f:
-        return f.read().strip()
+    try:
+        with open(sql_path, 'r') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Required SQL file not found: {sql_path}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to load SQL file {filename}: {e}")
 
 DEFINITIONS = """# Quester Definitions
 
@@ -924,7 +928,19 @@ QUEST_ALERTS_ENHANCED = _get_quest_alerts_enhanced_content()
 
 
 def register(mcp):
-    """Register all resources with the MCP server"""
+    """
+    Register all resources with the MCP server.
+    
+    Resources registered:
+    - questers://context/definitions - Core definitions (gameplay questers, bot detection, filters)
+    - questers://context/tables - BigQuery table schemas
+    - questers://context/analysis - Analysis patterns
+    - questers://context/decomposition - Metric decomposition model
+    - questers://context/phase0_team_okr - Phase 0: Team-level quota attainment
+    - questers://context/quest_alerts_enhanced - Phase 3 quest audit with automated alerts
+    - questers://context/quest_completions - Quest-level completions analysis
+    - questers://context/farming - Quest farming detection
+    """
     
     @mcp.resource("questers://context/definitions")
     def get_definitions() -> str:

@@ -1,2 +1,2 @@
-fastmcp>=0.1.0
-google-cloud-bigquery>=3.0.0
+fastmcp~=0.1.0
+google-cloud-bigquery~=3.0.0

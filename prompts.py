@@ -4,7 +4,17 @@ Prompts - Pre-defined analysis workflows
 
 
 def register(mcp):
-    """Register all prompts with the MCP server"""
+    """
+    Register all prompts with the MCP server.
+    
+    Prompts registered:
+    - questers_report - Full 4-phase weekly report (Phase 0 → 1 → 2 → 3)
+    - metric_decomposition - WoW delta breakdown with driver attribution
+    - investigate_game - Deep dive into specific game
+    - bot_analysis - Bot activity across all games
+    - quest_completions_breakdown - Simple quest completions (no alerts)
+    - quest_farming_analysis - Quest farming and reward rebalancing
+    """
     
     @mcp.prompt()
     def questers_report() -> str:
@@ -166,6 +176,7 @@ Or if you'd prefer a different angle:
 
 ### If user specifies a specific game:
 Filter the audit query to that game only using `WHERE game_name = 'GameName'`.
+(Note: Ensure game name is properly escaped in SQL to prevent injection)
 
 ## Phase 4: Investigate (only after user responds)
 Based on user direction, run targeted follow-up queries.
@@ -277,10 +288,14 @@ something else?"
 
 ## Instructions
 1. Read resources for table schemas and required filters
-2. Filter to game_name = '{game_name}'
+2. Filter to game_name = '{game_name}' (ensure game_name is properly escaped in SQL)
 3. Always filter event_ts
 4. Present numbers and trend FIRST
 5. **ASK the user for hypotheses before investigating**
+
+**SQL Safety Note:** When constructing queries, use BigQuery parameterized queries
+or ensure game_name is properly escaped to prevent SQL injection.
+Example: WHERE g.game_name = @game_name (parameterized)
 6. Run targeted queries based on user direction
 7. Join sybil_score on user_id to get bot %
 8. Check quest valid_from/valid_to for availability"""
@@ -495,9 +510,12 @@ bot farming, etc.), use the enhanced quest audit by reading the
         game_specific_note = f"""
 ### Game-Specific Instructions
 Since the user asked about {game_name}:
-- Filter to g.game_name = '{game_name}'
+- Filter to g.game_name = '{game_name}' (ensure proper SQL escaping)
 - Include bot % per quest (join sybil_score)
 - Use the "Filtered Query: Specific Game" from the quest_completions resource
+
+**SQL Safety:** Use parameterized queries (WHERE g.game_name = @game_name) or ensure
+game_name is properly escaped to prevent SQL injection.
 """ if game_name else """
 ### All-Games Instructions
 - Show ALL active non-Maintenance games
