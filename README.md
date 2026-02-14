@@ -9,7 +9,20 @@ MCP server for tracking and analyzing gameplay questers across Immutable games u
 python3 server.py
 ```
 
-The server exposes resources (context) and prompts (analysis workflows) for Phase 0-3 analysis.
+The server exposes resources (context), prompts (analysis workflows), and SQL queries for Phase 0-3 analysis.
+
+## Project Structure
+
+### SQL Files (All phases consolidated)
+```
+├── phase0_team_okr.sql          # Phase 0: 30-day quota attainment
+├── phase1_weekly_trends.sql     # Phase 1: Weekly WoW trends and farming
+├── phase2_decomposition.sql     # Phase 2: Driver attribution (New/Discontinued/Continuing)
+├── phase3_quest_completions.sql # Phase 3: Quest-level drill-down
+└── phase3_quest_alerts.sql      # Phase 3: Automated quest health alerts
+```
+
+All SQL queries are externalized for easier testing, maintenance, and version control.
 
 ## Features
 
@@ -72,7 +85,7 @@ AND g.plan_name != 'Maintenance'
 | `resources.py` | Context and definitions (loads SQL from files) |
 | `tools.py` | BigQuery query tool |
 | `phase0_team_okr.sql` | Phase 0 SQL query (Team OKR snapshot) |
-| `quest_alerts_enhanced.sql` | Phase 3 SQL query (Quest audit with alerts) |
+| `phase3_quest_alerts.sql` | Phase 3 SQL query (Quest audit with alerts) |
 | `requirements.txt` | Python dependencies |
 
 ## Setup
@@ -115,7 +128,7 @@ The server exposes context resources that can be integrated into other MCP serve
 - `questers://context/analysis` - Analysis patterns
 - `questers://context/decomposition` - Metric decomposition model
 - `questers://context/phase0_team_okr` - Phase 0: Team-level quota attainment (30-day rolling)
-- `questers://context/quest_alerts_enhanced` - Phase 3 quest audit with automated alerts
+- `questers://sql/phase3_quest_alerts` - Phase 3 quest audit with automated alerts
 - `questers://context/quest_completions` - Quest-level completions analysis
 - `questers://context/farming` - Quest farming detection
 
@@ -153,7 +166,7 @@ def weekly_questers_report():
 ### Option 2: Reference SQL Files
 Share the SQL files directly for your team's BigQuery integration:
 - `phase0_team_okr.sql` - Phase 0: Team OKR snapshot (30-day quota attainment)
-- `quest_alerts_enhanced.sql` - Phase 3: Quest audit with automated alerts
+- `phase3_quest_alerts.sql` - Phase 3: Quest audit with automated alerts
 
 ### Option 3: Run as Separate MCP Server
 Keep as standalone server and reference from your main MCP using MCP-to-MCP communication.

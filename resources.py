@@ -77,38 +77,12 @@ DATE_TRUNC(DATE(e.event_ts), WEEK(MONDAY)) as week_start
 
 **Important**: Convert TIMESTAMP to DATE before truncating!
 
-For week-on-week comparison (last 2 COMPLETE weeks, excludes current incomplete week):
+For WoW comparison, always exclude current incomplete week:
 ```sql
-WITH weekly_data AS (
-  SELECT 
-    g.game_name,
-    DATE_TRUNC(DATE(e.event_ts), WEEK(MONDAY)) as week_start,
-    COUNT(DISTINCT e.visitor_id) as questers
-  FROM `app_immutable_play.event` e
-  ...
-  WHERE 
-    e.event_ts >= TIMESTAMP(DATE_SUB(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)), INTERVAL 21 DAY))
-    AND e.event_ts < TIMESTAMP(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)))  -- EXCLUDE current week
-  GROUP BY g.game_name, week_start
-),
-last_week AS (
-  SELECT * FROM weekly_data 
-  WHERE week_start = DATE_SUB(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)), INTERVAL 7 DAY)
-),
-prev_week AS (
-  SELECT * FROM weekly_data 
-  WHERE week_start = DATE_SUB(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)), INTERVAL 14 DAY)
-)
-SELECT 
-  COALESCE(l.game_name, p.game_name) as game_name,
-  COALESCE(l.questers, 0) as last_week,
-  COALESCE(p.questers, 0) as prev_week,
-  COALESCE(l.questers, 0) - COALESCE(p.questers, 0) as change
-FROM last_week l
-FULL OUTER JOIN prev_week p ON l.game_name = p.game_name
+event_ts < TIMESTAMP(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)))
 ```
 
-**Important**: Always exclude current incomplete week by filtering `event_ts < TIMESTAMP(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)))`
+See `phase1_weekly_trends.sql` and `phase2_decomposition.sql` for complete examples.
 
 ## Counting
 Always use COUNT(DISTINCT visitor_id) to avoid duplicates.
@@ -215,97 +189,22 @@ Include:
 - Bot % (from sybil_score where bot_score = 1)
 - Reason for change (up/down)
 
-## Investigation Workflow (ALWAYS FOLLOW)
+## Investigation Workflow
 
-After presenting initial numbers, you MUST follow this workflow for any game
-with a significant change (>20% WoW or >1,000 users absolute change):
+1. **Present numbers first** - Overall + per-game breakdown
+2. **Flag top movers** - Top 3-5 games with biggest changes
+3. **STOP and ASK** - Let user choose what to investigate
+4. **Run targeted queries** - Based on user hypothesis
+5. **Iterate** - Report back and ask if they want more
 
-### Step 1: Present the Numbers
-Show the overall total and per-game breakdown as usual.
+**Key principle:** Don't dump all analysis at once. Make it a conversation.
 
-### Step 2: Flag Significant Movers
-Clearly call out the top 3-5 games with the biggest changes (up AND down).
-For each, state what you already know:
-- Direction and magnitude of change
-- Quest count change (if any)
-- Bot % change (if any)
+## Reference SQL Queries
 
-### Step 3: STOP AND ASK THE USER
-Before investigating further, ALWAYS ask the user:
-1. "Which of these do you want me to dig into?"
-2. "Do you have any hypotheses for why [game] went up/down?"
-3. "What would you like to see? e.g. quest-level breakdown, bot analysis,
-   multi-week trend, farming detection, user overlap?"
-
-Present these as options. Wait for user input before proceeding.
-
-### Step 4: Investigate Based on User Direction
-Once the user responds, run targeted queries based on their hypothesis:
-- If they suspect quest changes → query quest valid_from/valid_to
-- If they suspect bots → run farming analysis on that game
-- If they want trends → pull 4-week history
-- If they have a custom hypothesis → design a query to test it
-
-### Step 5: Report Back and Iterate
-Present findings and ask: "Does this answer your question, or do you want
-to dig deeper into something else?"
-
-**IMPORTANT:** Never just dump all analysis at once. The goal is a
-conversation, not a monologue. Let the user guide the investigation.
-
-## Common Hypotheses to Suggest
-
-When a game goes UP, suggest investigating:
-- Were new quests added? (check quest valid_from)
-- Did bot % increase? (bots discovered the game)
-- Was there a marketing push? (sudden spike pattern)
-- Did another game's users migrate? (user overlap analysis)
-
-When a game goes DOWN, suggest investigating:
-- Did quests expire? (check quest valid_to)
-- Were quests removed/paused? (quest count dropped)
-- Did bot % drop? (sybil cleanup = "healthy" decline)
-- Is the game in maintenance/sunset? (check plan_name changes)
-- Did rewards change? (lower incentive)
-
-## Why Gameplay Questers Go Up or Down
-
-### Reasons for INCREASE
-- More gameplay quests added
-- New quest launch with high engagement
-- Game entered rewards program
-- Marketing campaign drove traffic
-- Bot wave discovered the game
-
-### Reasons for DECREASE  
-- Fewer gameplay quests available
-- Quests expired (valid_to passed)
-- High bot % (sybils farming)
-- Game left rewards program
-- Poor quest design (low completion)
-- Sybil cleanup (bots removed — this is a healthy decline)
-
-## Query: Overall Gameplay Questers (Last 2 Complete Weeks)
-```sql
-SELECT 
-  DATE_TRUNC(DATE(e.event_ts), WEEK(MONDAY)) as week_start,
-  COUNT(DISTINCT e.visitor_id) as gameplay_questers
-FROM `app_immutable_play.event` e
-INNER JOIN `app_immutable_play.visitor` v ON e.visitor_id = v.visitor_id
-LEFT JOIN `app_immutable_play.quest` q ON e.quest_id = q.quest_id
-LEFT JOIN `app_immutable_play.game` g ON q.game_id = g.game_id
-LEFT JOIN UNNEST(q.quest_category) AS category
-WHERE 
-  e.event_ts >= TIMESTAMP(DATE_SUB(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)), INTERVAL 21 DAY))
-  AND e.event_ts < TIMESTAMP(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)))
-  AND v.is_front_end_cohort = TRUE
-  AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
-  AND g.game_name NOT IN ('Guild of Guardians', 'Gods Unchained')
-  AND g.plan_name != 'Maintenance'
-  AND category LIKE '%gameplay%'
-GROUP BY week_start
-ORDER BY week_start DESC
-```
+See `phase1_weekly_trends.sql` for complete SQL queries including:
+- Overall Gameplay Questers (Last 2 Complete Weeks)
+- Per-Game Breakdown with WoW
+- Quest Farming Analysis
 
 ## Quest Farming Detection
 
@@ -327,63 +226,7 @@ ORDER BY week_start DESC
 | Bot% ≥80% | Add verification, reduce rewards, or discontinue |
 | Completions/User >10 | Add cooldowns or diminishing returns |
 | Low human engagement, low bot% | Increase rewards or improve quest UX |
-| High human engagement, low bot% | Keep as-is (healthy quest) |
-
-### Query: Quest Farming Analysis
-```sql
-SELECT 
-  g.game_name,
-  q.quest_name,
-  COUNT(*) as completions,
-  COUNT(DISTINCT e.visitor_id) as unique_users,
-  COUNT(DISTINCT CASE WHEN s.bot_score = 1 THEN e.visitor_id END) as bot_users,
-  COUNT(DISTINCT CASE WHEN s.bot_score IS NULL OR s.bot_score < 1 THEN e.visitor_id END) as human_users,
-  ROUND(100.0 * COUNT(DISTINCT CASE WHEN s.bot_score = 1 THEN e.visitor_id END) / 
-        NULLIF(COUNT(DISTINCT e.visitor_id), 0), 0) as bot_pct,
-  ROUND(1.0 * COUNT(*) / NULLIF(COUNT(DISTINCT e.visitor_id), 0), 1) as completions_per_user
-FROM `app_immutable_play.event` e
-JOIN `app_immutable_play.visitor` v ON e.visitor_id = v.visitor_id
-LEFT JOIN `app_immutable_play.quest` q ON e.quest_id = q.quest_id
-LEFT JOIN `app_immutable_play.game` g ON q.game_id = g.game_id
-LEFT JOIN `mod_imx.sybil_score` s ON v.user_id = s.user_id
-WHERE 
-  e.event_ts >= TIMESTAMP(DATE_SUB(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)), INTERVAL 7 DAY))
-  AND e.event_ts < TIMESTAMP(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)))
-  AND v.is_front_end_cohort = TRUE
-  AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
-  AND g.game_name NOT IN ('Guild of Guardians', 'Gods Unchained')
-  AND g.plan_name != 'Maintenance'
-GROUP BY g.game_name, q.quest_name
-ORDER BY bot_pct DESC, completions DESC
-```
-
-## Query: Per-Game Breakdown with WoW
-```sql
-SELECT 
-  g.game_name,
-  g.plan_name as tier,
-  g.account_manager_name as am,
-  COUNT(DISTINCT e.visitor_id) as gameplay_questers,
-  COUNT(DISTINCT q.quest_id) as gameplay_quests,
-  ROUND(100.0 * COUNT(DISTINCT CASE WHEN s.bot_score = 1 THEN e.visitor_id END) / 
-        NULLIF(COUNT(DISTINCT e.visitor_id), 0), 1) as bot_pct
-FROM `app_immutable_play.event` e
-INNER JOIN `app_immutable_play.visitor` v ON e.visitor_id = v.visitor_id
-LEFT JOIN `app_immutable_play.quest` q ON e.quest_id = q.quest_id
-LEFT JOIN `app_immutable_play.game` g ON q.game_id = g.game_id
-LEFT JOIN UNNEST(q.quest_category) AS category
-LEFT JOIN `mod_imx.sybil_score` s ON v.user_id = s.user_id
-WHERE 
-  e.event_ts >= TIMESTAMP(DATE_SUB(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)), INTERVAL 7 DAY))
-  AND e.event_ts < TIMESTAMP(DATE_TRUNC(CURRENT_DATE(), WEEK(MONDAY)))
-  AND v.is_front_end_cohort = TRUE
-  AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
-  AND g.game_name NOT IN ('Guild of Guardians', 'Gods Unchained')
-  AND g.plan_name != 'Maintenance'
-  AND category LIKE '%gameplay%'
-GROUP BY g.game_name, g.plan_name, g.account_manager_name
-ORDER BY gameplay_questers DESC
-```"""
+| High human engagement, low bot% | Keep as-is (healthy quest) |"""
 
 
 DECOMPOSITION = """# Metric Decomposition Model
@@ -391,6 +234,11 @@ DECOMPOSITION = """# Metric Decomposition Model
 ## Purpose
 Replace "Questers is down 3%" with driver attribution showing WHY.
 This is the STANDARD format for Phase 2 analysis in all weekly reports.
+
+## Reference SQL Query
+
+See `phase2_decomposition.sql` for the complete WoW decomposition query that classifies
+games into buckets and calculates human/bot splits.
 
 ## The Model
 
@@ -523,34 +371,7 @@ Always note this caveat in the output.
 | Continuing negative | Organic ecosystem decline | Investigate churn |
 | Bot decline + Human growth | Quality improving | Highlight as positive for PM |
 
-## Example Output
-
-```
-Total Δ: +3,022 (+5.4%)
-
-  + New Games:              +12,843
-      └─ Might and Magic: Fates   +12,530  (64% bots ⚠️)
-      └─ Emoji Marble Dash          +313  (22% bots ✓)
-
-  - Discontinued / Off:    -44,768  (76% were bots)
-      └─ Plooshy Pile Up        -24,826  (was 74% bots)
-      └─ Meta Toy DragonZ SAGA  -14,612  (was 72% bots)
-      └─ Dalarnia Legends        -5,330  (was 95% bots)
-
-  + Continuing Games:      +23,904  (net)
-      Bots:   -5,317   ← ongoing bot cleanup
-      Humans: +29,221   ← strong organic growth
-
-      Growth:
-        └─ Trillionaire Thugs ZW  +19,165  (humans +9.7K, bots +9.4K ⚠️)
-        └─ Elumia                  +2,640  (bots -5.8K, humans +8.5K ✓✓)
-      Decline:
-        └─ Syndicate of Vigilantes -2,392  (bots -6.8K, humans +4.5K ✓)
-        └─ Villains               -1,062  (bots -1.9K, humans +836 ✓)
-
-  ──────────────────────────────────────
-  Note: Per-game sums ≠ overall total due to multi-game users.
-```"""
+Use ⚠️ for concerning signals (high bot %, bot spike) and ✓ for healthy signals."""
 
 
 FARMING = """# Quest Farming Analysis
@@ -630,65 +451,11 @@ This answers: "Which specific quests are driving the change in questers?"
 
 Use this after Phase 2 (decomposition) when the user wants quest-level granularity.
 
-## Default Query: All Active Games (Last 3 Days)
-Shows every quest with completions across all active non-Maintenance games.
-Useful for spotting which quests are hot, dead, or anomalous.
+## Reference SQL Queries
 
-```sql
-SELECT
-  g.game_name,
-  q.quest_name,
-  q.quest_id,
-  COUNT(*) AS quest_completions,
-  COUNT(DISTINCT e.visitor_id) AS unique_completers,
-  ROUND(1.0 * COUNT(*) / NULLIF(COUNT(DISTINCT e.visitor_id), 0), 1) AS completions_per_user
-FROM `app_immutable_play.event` e
-INNER JOIN `app_immutable_play.visitor` v ON e.visitor_id = v.visitor_id
-LEFT JOIN `app_immutable_play.quest` q ON e.quest_id = q.quest_id
-LEFT JOIN `app_immutable_play.game` g ON q.game_id = g.game_id
-LEFT JOIN UNNEST(q.quest_category) AS category
-WHERE
-  e.event_ts >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
-  AND v.is_front_end_cohort = TRUE
-  AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
-  AND g.game_name NOT IN ('Guild of Guardians', 'Gods Unchained')
-  AND g.plan_name != 'Maintenance'
-  AND category LIKE '%gameplay%'
-GROUP BY g.game_name, q.quest_name, q.quest_id
-ORDER BY g.game_name, quest_completions DESC
-```
-
-## Filtered Query: Specific Game (Last 3 Days, with Bot %)
-When the user asks about a specific game, include bot % per quest.
-
-```sql
-SELECT
-  g.game_name,
-  q.quest_name,
-  q.quest_id,
-  COUNT(*) AS quest_completions,
-  COUNT(DISTINCT e.visitor_id) AS unique_completers,
-  COUNT(DISTINCT CASE WHEN s.bot_score = 1 THEN e.visitor_id END) AS bot_completers,
-  COUNT(DISTINCT CASE WHEN s.bot_score IS NULL OR s.bot_score < 1 THEN e.visitor_id END) AS human_completers,
-  ROUND(100.0 * COUNT(DISTINCT CASE WHEN s.bot_score = 1 THEN e.visitor_id END) /
-        NULLIF(COUNT(DISTINCT e.visitor_id), 0), 1) AS bot_pct,
-  ROUND(1.0 * COUNT(*) / NULLIF(COUNT(DISTINCT e.visitor_id), 0), 1) AS completions_per_user
-FROM `app_immutable_play.event` e
-INNER JOIN `app_immutable_play.visitor` v ON e.visitor_id = v.visitor_id
-LEFT JOIN `app_immutable_play.quest` q ON e.quest_id = q.quest_id
-LEFT JOIN `app_immutable_play.game` g ON q.game_id = g.game_id
-LEFT JOIN UNNEST(q.quest_category) AS category
-LEFT JOIN `mod_imx.sybil_score` s ON v.user_id = s.user_id
-WHERE
-  e.event_ts >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
-  AND v.is_front_end_cohort = TRUE
-  AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
-  AND g.game_name = '{game_name}'  -- Replace with actual game name
-  AND g.plan_name != 'Maintenance'
-  AND category LIKE '%gameplay%'
-GROUP BY g.game_name, q.quest_name, q.quest_id
-ORDER BY quest_completions DESC
-```
+See `phase3_quest_completions.sql` for complete SQL queries including:
+- All Active Games - Quest Completions (Last 3 Days)
+- Specific Game with Bot % Breakdown (Last 3 Days)
 
 ## Presentation Format
 
@@ -730,197 +497,77 @@ After presenting quest-level data, ask:
 """
 
 
+def _get_phase1_weekly_trends_content() -> str:
+    """Phase 1: Weekly trends SQL"""
+    return _load_sql('phase1_weekly_trends.sql')
+
+
+def _get_phase2_decomposition_content() -> str:
+    """Phase 2: WoW decomposition SQL"""
+    return _load_sql('phase2_decomposition.sql')
+
+
+def _get_phase3_quest_completions_content() -> str:
+    """Phase 3: Quest completions SQL"""
+    return _load_sql('phase3_quest_completions.sql')
+
+
 def _get_phase0_team_okr_content() -> str:
-    """Generate Phase 0 Team OKR documentation with SQL loaded from file"""
+    """Phase 0: Team OKR with 30-day quota attainment"""
     sql_query = _load_sql('phase0_team_okr.sql')
     
     return f"""# Phase 0: Team OKR Overview
 
-## Purpose
-Show team-level portfolio health via 30-day rolling quota attainment before weekly trend analysis.
+Shows % of active games meeting monthly gameplay quotas (30-day rolling).
 
-This answers: "What % of our active games are meeting their monthly gameplay quotas?"
-
-## Metric Definition
-
+## Metric
 **Quota Attainment** = `actual_questers_30d / monthly_gameplay_target * 100`
 
-- **30-day rolling window:** COUNT(DISTINCT visitor_id) for last 30 days
-- **Monthly target:** From `game.monthly_gameplay_target` column
-- **Meeting quota:** actual >= target (100%+)
-
-## Required Filters (ALWAYS APPLY)
-
-Same as other phases, plus additional filters:
-```sql
-WHERE e.event_ts >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
-  AND v.is_front_end_cohort = TRUE
-  AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
-  AND g.game_name NOT IN ('Guild of Guardians', 'Gods Unchained')
-  AND g.plan_name != 'Maintenance'  -- Exclude Maintenance tier
-  AND g.active_subscription = TRUE  -- Only active subscriptions
-  AND g.monthly_gameplay_target IS NOT NULL  -- Only games with targets set
-GROUP BY ...
-HAVING COUNT(DISTINCT e.visitor_id) >= 10  -- Exclude games with <10 questers (testing/inactive)
-```
-
-**Additional filter for testing quests:**
-- Exclude games where ALL gameplay quests have "testing" in their category
-- Only count `non_testing_quests > 0`
+## Filters
+- Games with ≥10 questers in last 30 days
+- At least 1 non-testing gameplay quest
+- Has `monthly_gameplay_target` set
 
 ## Output Format
+1. Overall: "X/Y games (Z%) meeting quota"
+2. Tier breakdown (Ultra Boost, Boost, Core)
+3. Table of games BELOW quota (<100%), sorted by % ascending
 
-### Overall Summary
-```
-📊 PHASE 0: TEAM OKR SNAPSHOT (Last 30 Days)
-Filtered: Games with ≥10 questers AND at least 1 non-testing gameplay quest
-
-Overall Quota Attainment: 14/22 games (64%) meeting monthly target
-```
-
-### Tier Breakdown
-```
-Tier Breakdown:
-- Ultra Boost: 3/4 games (75%) meeting quota
-- Boost: 5/8 games (63%) meeting quota
-- Core: 6/10 games (60%) meeting quota
-```
-
-### Below-Quota Games (Table)
-**ONLY show games with actual < target (below 100%)**
-
-```
-⚠️ Games Below Quota (8 games):
-
-| Game | Tier | AM | Actual (30d) | Target | % of Quota | Gap | # Gameplay Quests |
-|------|------|-----|--------------|--------|------------|-----|-------------------|
-| Game C | Core | Alice | 3,200 | 5,000 | 64% | -1,800 | 3 |
-```
-
-Sort by % of Quota ascending (worst performers first).
-
-### Separator
-```
-────────────────────────────────────────────
-```
-
-Then continue to Phase 1.
-
-## Reference SQL Query
-
+## SQL Query
 ```sql
 {sql_query}
-```
-
-## Edge Cases
-
-### Missing Quota Data
-If `monthly_gameplay_target IS NULL`:
-- Exclude from Phase 0 analysis
-- Count excluded games and note in output: "(X games excluded - no quota set)"
-
-### Low Activity Games
-If game has <10 questers in last 30 days:
-- Exclude from Phase 0 (likely testing/inactive)
-- These games won't count toward total denominator
-
-### Testing Quests Only
-If game only has quests with "testing" category:
-- Exclude from Phase 0 (not production-ready)
-- Check `non_testing_quests > 0` filter
-
-### New Games
-If game created <30 days ago:
-- Still include (uses available data)
-- May show low % if ramping up
-"""
+```"""
 
 
 # Cache the content so we don't read from file multiple times
 PHASE0_TEAM_OKR = _get_phase0_team_okr_content()
+PHASE1_WEEKLY_TRENDS_SQL = _get_phase1_weekly_trends_content()
+PHASE2_DECOMPOSITION_SQL = _get_phase2_decomposition_content()
+PHASE3_QUEST_COMPLETIONS_SQL = _get_phase3_quest_completions_content()
 
 
 def _get_quest_alerts_enhanced_content() -> str:
-    """Generate Quest Alerts Enhanced documentation with SQL loaded from file"""
-    sql_query = _load_sql('quest_alerts_enhanced.sql')
+    """Phase 3: Quest audit with automated alert flags"""
+    sql_query = _load_sql('phase3_quest_alerts.sql')
     
-    return f"""# Quest Alerts Dashboard - Enhanced (Phase 3 Reference)
+    return f"""# Quest Alerts Dashboard (Phase 3)
 
-This is the **complete implementation** of the Phase 3 quest audit system with automated alert flags.
+Identifies problematic quests: broken, bot-farmed, declining, engagement issues.
 
-## Purpose
-Identify problematic quests at scale:
-- 🔴 Broken quests (sudden drop-offs)
-- 🔴 Bot-farmed quests (high bot %, excessive completions/user)
-- 📉 Declining quests (trending downwards)
-- ⚠️ Engagement issues
+## Alert Priority
+- 🔴 **Critical (1-2)**: Bot% ≥80%, farming >20x/user, possibly broken
+- 🟡 **Medium (3)**: Bot% 70-80%, farming 10-20x, major drops >70%
+- ⚠️ **Low (4)**: Low activity, no recent completions
 
-## Alert Severity
+## Time Windows
+- 48h: Rapid anomaly detection
+- 7d: Trend analysis
+- 30d: Bot % baseline
 
-### 🔴 Critical (Priority 1-2)
-- **Critical bot rate** ≥90%
-- **High bot rate** 80-90%
-- **Excessive farming** >20 completions/user (with 10+ users)
-- **No completions in 7d** (but had activity 7-14d ago) → Likely broken
-- **Possibly broken** 0 completions in 48h (but had 5+ prev 48h)
-
-### 🟡 Medium (Priority 3)
-- **Elevated bot rate** 70-80%
-- **High farming** 10-20 completions/user
-- **Major activity drop** >70% user decline (48h window)
-- **Trending downwards** >25% completion decline (7d)
-
-### ⚠️ Low (Priority 4)
-- **Low recent activity** <5 users in 48h (was 20+)
-- **No recent completions** >48h since last completion
-
-## Time Windows Strategy
-
-| Window | Comparison | Purpose | Detection Speed |
-|--------|-----------|---------|-----------------|
-| **48h** | Current vs 48-96h ago | Rapid anomaly detection | 1-2 days |
-| **7d** | Current vs 7-14d ago | Trend analysis | 1 week |
-| **30d** | Overall baseline | Bot % and patterns | 1 month |
-
-## Key Metrics
-
-| Metric | Formula | Detects |
-|--------|---------|---------|
-| `bot_rate_pct` | `bot_users / total_users * 100` | Bot concentration |
-| `completions_per_user` | `total_completions / distinct_users` | Farming/grinding |
-| `activity_drop_pct` | `(users_prev_48h - users_48h) / users_prev_48h * 100` | Rapid drops |
-| `completions_7d_drop_pct` | `(completions_prev_7d - completions_7d) / completions_prev_7d * 100` | Trends |
-
-## Full SQL Query
-
+## SQL Query
 ```sql
 {sql_query}
-```
-
-## Usage Notes
-
-1. **Filter to problems only** - Uncomment WHERE clause at end to show only alerts
-2. **By Account Manager** - Use for AM-specific reports
-3. **By Game** - Add `WHERE game_name = 'GameName'` to drill into specific game
-4. **Export to CSV** - For sharing with AMs or PMs
-
-## Example Alerts Explained
-
-| Alert | What It Means | Action |
-|-------|---------------|--------|
-| 🔴 CRITICAL BOT RATE (96%) | Almost all users are bots | Urgent: Review quest design, reduce rewards |
-| 🔴 EXCESSIVE FARMING (42.3x/user) | Users completing quest 40+ times | Add cooldowns or caps |
-| ⚠️ NO COMPLETIONS LAST 7D | Quest had activity, now 0 | Check if quest is broken |
-| 📉 TRENDING DOWNWARDS (34%) | Completions dropping steadily | Investigate cause, may be broken |
-| ⚠️ POSSIBLY BROKEN | Sudden drop to 0 in 48h | Technical issue likely |
-
-## When to Use
-
-- After Phase 2 decomposition shows large WoW changes
-- When investigating specific game's decline/growth
-- Weekly quest health audit for all games
-- When PM/CG asks "Why did this game's questers drop?"
-"""
+```"""
 
 
 # Cache the content so we don't read from file multiple times
@@ -936,10 +583,13 @@ def register(mcp):
     - questers://context/tables - BigQuery table schemas
     - questers://context/analysis - Analysis patterns
     - questers://context/decomposition - Metric decomposition model
-    - questers://context/phase0_team_okr - Phase 0: Team-level quota attainment
-    - questers://context/quest_alerts_enhanced - Phase 3 quest audit with automated alerts
-    - questers://context/quest_completions - Quest-level completions analysis
     - questers://context/farming - Quest farming detection
+    - questers://context/quest_completions - Quest-level completions analysis
+    - questers://sql/phase0_team_okr - Phase 0 SQL: Team-level quota attainment
+    - questers://sql/phase1_weekly_trends - Phase 1 SQL: Weekly trends and farming analysis
+    - questers://sql/phase2_decomposition - Phase 2 SQL: WoW driver attribution
+    - questers://sql/phase3_quest_completions - Phase 3 SQL: Quest-level drill-down
+    - questers://sql/phase3_quest_alerts - Phase 3 SQL: Quest audit with automated alerts
     """
     
     @mcp.resource("questers://context/definitions")
@@ -972,12 +622,28 @@ def register(mcp):
         """Quest-level completions analysis for Phase 3 drill-down"""
         return QUEST_COMPLETIONS
     
-    @mcp.resource("questers://context/phase0_team_okr")
-    def get_phase0_team_okr() -> str:
-        """Phase 0: Team-level OKR snapshot showing 30-day quota attainment"""
+    # SQL References - Provide complete queries with documentation
+    @mcp.resource("questers://sql/phase0_team_okr")
+    def get_phase0_sql() -> str:
+        """Phase 0 SQL: Team-level OKR snapshot showing 30-day quota attainment"""
         return PHASE0_TEAM_OKR
     
-    @mcp.resource("questers://context/quest_alerts_enhanced")
-    def get_quest_alerts_enhanced() -> str:
-        """Enhanced quest audit system with automated alert flags (Phase 3 reference)"""
+    @mcp.resource("questers://sql/phase1_weekly_trends")
+    def get_phase1_sql() -> str:
+        """Phase 1 SQL: Weekly trends and quest farming analysis"""
+        return PHASE1_WEEKLY_TRENDS_SQL
+    
+    @mcp.resource("questers://sql/phase2_decomposition")
+    def get_phase2_sql() -> str:
+        """Phase 2 SQL: WoW driver attribution with bucket classification"""
+        return PHASE2_DECOMPOSITION_SQL
+    
+    @mcp.resource("questers://sql/phase3_quest_completions")
+    def get_phase3_completions_sql() -> str:
+        """Phase 3 SQL: Quest-level completions drill-down"""
+        return PHASE3_QUEST_COMPLETIONS_SQL
+    
+    @mcp.resource("questers://sql/phase3_quest_alerts")
+    def get_phase3_alerts_sql() -> str:
+        """Phase 3 SQL: Enhanced quest audit system with automated alert flags"""
         return QUEST_ALERTS_ENHANCED
