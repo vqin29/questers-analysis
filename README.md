@@ -1,9 +1,15 @@
 # Questers MCP Server
 
-MCP server for tracking and analyzing gameplay questers across Immutable games.
+MCP server for tracking and analyzing gameplay questers across Immutable games using a **4-Phase Analysis Framework**.
 
 ## Quick Start
 
+### Run MCP Server
+```bash
+python3 server.py
+```
+
+### Run Standalone Scripts
 ```bash
 # Run weekly decomposition model
 python3 decomposition.py
@@ -14,27 +20,51 @@ python3 weekly_summary.py
 
 ## Features
 
-### 1. Weekly Summary (`weekly_summary.py`)
-PM-ready table with all active games:
-- Questers WoW comparison
-- Quest availability (in-game quests)
-- Bot % by game
-- Key drivers (new launches, declines, bot influx)
+### 1. 4-Phase Analysis Framework (MCP Server)
 
-### 2. Metric Decomposition (`decomposition.py`)
-Explains WHY questers changed with non-overlapping buckets:
+**Phase 0: Team OKR Snapshot (30-day rolling)**
+- Overall quota attainment (% of games meeting monthly targets)
+- Tier breakdown (Core, Boost, Ultra Boost)
+- Games below quota with gap analysis
+- Filtered: ≥10 questers AND non-testing quests only
+
+**Phase 1: Present the Numbers**
+- Overall total questers (WoW comparison)
+- Per-game breakdown with bot % and quest counts
+
+**Phase 2: Decomposition (WHY questers changed)**
+- Classify games: New / Discontinued / Continuing
+- Bot vs human split
+- PM narrative explaining key drivers
+
+**Phase 3: Quest-Level Audit (Automated alerts)**
+- 🔴 Broken quests (sudden drop-offs)
+- 🔴 Bot-farmed quests (high bot %, excessive farming)
+- 📉 Declining quests (trending downwards)
+- ⚠️ Engagement issues
+
+### 2. Standalone Scripts
+
+**Weekly Decomposition (`decomposition.py`)**
 ```
 Total Δ = [New Games] + [Discontinued Games] + [Continuing Games]
 ```
 
-### 3. Quest Farming Analysis
-Identifies over-farmed quests and under-incentivized real players:
-- Bot % by quest
-- Completions per user (grinding indicator)
-- Reward rebalancing recommendations
+**Weekly Summary (`weekly_summary.py`)**
+PM-ready table with all active games:
+- Questers WoW comparison
+- Quest availability (in-game quests)
+- Bot % by game
+- Key drivers
 
-### 4. MCP Server (`server.py`)
-FastMCP server with prompts for AI-assisted analysis.
+### 3. Quest Health Monitoring
+
+**Quest Alerts Dashboard (`quest_alerts_enhanced.sql`)**
+Identifies problematic quests at scale:
+- Bot % per quest
+- Completions per user (grinding indicator)
+- Activity drops (48h and 7d windows)
+- Automated alert flags and priority levels
 
 ## Required Filters (Always Applied)
 
@@ -97,10 +127,53 @@ Add to `~/.cursor/mcp.json`:
 }
 ```
 
-## Prompts Available
+## Available MCP Resources
 
-- `questers_report` - Standard weekly report
-- `metric_decomposition` - WoW delta breakdown
-- `quest_farming_analysis` - Bot/farming detection
+The server exposes context resources that can be integrated into other MCP servers:
+
+- `questers://context/definitions` - Core definitions (gameplay questers, bot detection, filters)
+- `questers://context/tables` - BigQuery table schemas
+- `questers://context/analysis` - Analysis patterns
+- `questers://context/decomposition` - Metric decomposition model
+- `questers://context/phase0_team_okr` - Phase 0: Team-level quota attainment (30-day rolling)
+- `questers://context/quest_alerts_enhanced` - Phase 3 quest audit with automated alerts
+- `questers://context/quest_completions` - Quest-level completions analysis
+- `questers://context/farming` - Quest farming detection
+
+## Available Prompts
+
+- `questers_report` - Full 4-phase weekly report (Phase 0 → 1 → 2 → 3)
+- `metric_decomposition` - WoW delta breakdown with driver attribution
 - `investigate_game` - Deep dive into specific game
 - `bot_analysis` - Bot activity across all games
+- `quest_completions_breakdown` - Simple quest completions (no alerts)
+- `quest_farming_analysis` - Quest farming and reward rebalancing
+
+## Integrating with Your Team's MCP
+
+If your team has an existing MCP server with BigQuery access, you can add the questers analysis framework:
+
+### Option 1: Copy Resources and Prompts
+Copy the relevant sections from `resources.py` and `prompts.py` into your team's MCP:
+
+```python
+# In your team's MCP server
+@mcp.resource("uri://questers/analysis-framework")
+def questers_analysis():
+    """3-Phase questers analysis framework"""
+    # Copy DECOMPOSITION + QUEST_ALERTS_ENHANCED from resources.py
+    return context_string
+
+@mcp.prompt()
+def weekly_questers_report():
+    """Run weekly questers analysis"""
+    # Copy questers_report() from prompts.py
+    return prompt_string
+```
+
+### Option 2: Reference SQL Files
+Share the SQL reference file directly:
+- `quest_alerts_enhanced.sql` - Complete Phase 3 quest audit query
+
+### Option 3: Run as Separate MCP Server
+Keep as standalone server and reference from your main MCP using MCP-to-MCP communication.
