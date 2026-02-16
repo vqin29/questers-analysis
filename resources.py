@@ -168,6 +168,36 @@ Rewards participation.
 
 ANALYSIS = """# Analysis Guide
 
+## Standard Query Patterns (ALWAYS FOLLOW)
+
+When users ask about specific topics, automatically run the appropriate phase(s):
+
+### 1. Gameplay OKR Questions
+User asks: "What is the gameplay OKR?" / "How are games doing against quota?" / "OKR status?" / "quota attainment"
+→ **Run Phase 0** (phase0_team_okr.sql)
+→ Show: Overall quota attainment, tier breakdown, games below quota
+
+### 2. Questers WoW / Week-over-Week / Performance Questions  
+User asks: "What about questers WoW?" / "Weekly performance?" / "How did questers change?" / "Questers performance?" / any question about questers trends
+→ **Run BOTH Phase 1 AND Phase 2** (REQUIRED - NOT OPTIONAL):
+  
+  **Phase 1** (phase1_weekly_trends.sql) - Run ALL 3 queries:
+  - Query 1: Overall gameplay questers (last 2-3 complete weeks) showing WoW trend
+  - Query 2: Per-game breakdown showing questers, quests available, bot % for last week
+  - Query 3: Quest farming analysis (optional, show if relevant)
+  
+  **Phase 2** (phase2_decomposition.sql):
+  - Decomposition into New Games, Discontinued Games, and Continuing Games with human/bot split
+  - Shows what's DRIVING the WoW change (not just the headline number)
+  
+→ **Output MUST include**:
+  1. Overall WoW trend (total questers by week with % change)
+  2. Decomposition breakdown (New/Discontinued/Continuing buckets with impact)
+  3. Game-level table: Game | Questers | Bot % | Quests Available (week-over-week comparison)
+  4. New game launches (games that went from 0 to N questers)
+  5. Discontinued/churned games (games that went from N to 0 questers or turned off)
+  6. Key insights about quality (human vs bot growth)
+
 ## Standard Output Format
 When asked about questers, always provide:
 

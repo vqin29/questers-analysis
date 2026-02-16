@@ -52,6 +52,7 @@ ORDER BY gameplay_questers DESC;
 
 -- QUERY 3: Quest Farming Analysis (Last Week)
 -- Identifies over-farmed quests with high bot % and excessive completions per user
+-- Note: Analyzes ALL quest types (gameplay, social post, engage) since farming can occur in any category
 SELECT 
   g.game_name,
   q.quest_name,

@@ -13,22 +13,34 @@ def register(mcp):
     Register all tools with the MCP server.
     
     Tools registered:
-    - query_bigquery: Execute SQL queries against BigQuery with safety checks
+    - query_bigquery: Execute SQL queries against BigQuery with safety checks and parameter support
     """
     
     @mcp.tool()
-    def query_bigquery(sql: str) -> str:
+    def query_bigquery(sql: str, parameters: dict = None) -> str:
         """
-        Execute a SQL query against BigQuery.
+        Execute a SQL query against BigQuery with optional parameters.
         
         IMPORTANT: Always filter event_ts when querying app_immutable_play.event
         to avoid expensive queries (700M+ rows).
         
         Args:
-            sql: The SQL query to execute
+            sql: The SQL query to execute (use @param_name for parameters)
+            parameters: Optional dict of parameters for parameterized queries
+                       Example: {"game_name": "MetalCore", "days": 7}
         
         Returns:
             JSON string with query results
+        
+        Examples:
+            # Without parameters
+            query_bigquery("SELECT COUNT(*) FROM table")
+            
+            # With parameters (prevents SQL injection)
+            query_bigquery(
+                "SELECT * FROM game WHERE game_name = @game_name",
+                {"game_name": "MetalCore"}
+            )
         """
         # Warn if querying event table without time filter
         sql_lower = sql.lower()
@@ -45,6 +57,25 @@ def register(mcp):
             job_config = bigquery.QueryJobConfig(
                 maximum_bytes_billed=10_000_000_000  # 10 GB limit to prevent runaway costs
             )
+            
+            # Add query parameters if provided
+            if parameters:
+                query_parameters = []
+                for param_name, param_value in parameters.items():
+                    # Infer parameter type from Python type
+                    if isinstance(param_value, bool):
+                        param_type = "BOOL"
+                    elif isinstance(param_value, int):
+                        param_type = "INT64"
+                    elif isinstance(param_value, float):
+                        param_type = "FLOAT64"
+                    else:
+                        param_type = "STRING"
+                    
+                    query_parameters.append(
+                        bigquery.ScalarQueryParameter(param_name, param_type, param_value)
+                    )
+                job_config.query_parameters = query_parameters
             
             # Execute query with timeout
             query_job = bq_client.query(sql, job_config=job_config)

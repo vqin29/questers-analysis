@@ -1,6 +1,10 @@
 -- Phase 3: Quest-Level Completions Analysis
 -- Drill down from game-level to individual quest completions
 -- Shows which specific quests are driving changes in questers
+--
+-- USAGE NOTE:
+-- Query 2 uses parameterized query @game_name to prevent SQL injection.
+-- Execute with: query_bigquery(sql, {"game_name": "MetalCore"})
 
 -- QUERY 1: All Active Games - Quest Completions (Last 3 Days)
 -- Default query showing every quest with completions across all active games
@@ -27,7 +31,7 @@ GROUP BY g.game_name, q.quest_name, q.quest_id
 ORDER BY g.game_name, quest_completions DESC;
 
 -- QUERY 2: Specific Game with Bot % (Last 3 Days)
--- Replace {game_name} with actual game name for detailed quest-level analysis
+-- Use parameterized query: @game_name (safe from SQL injection)
 SELECT
   g.game_name,
   q.quest_name,
@@ -49,7 +53,7 @@ WHERE
   e.event_ts >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
   AND v.is_front_end_cohort = TRUE
   AND (v.is_immutable_employee = FALSE OR v.is_immutable_employee IS NULL)
-  AND g.game_name = '{game_name}'  -- Replace with actual game name
+  AND g.game_name = @game_name
   AND g.plan_name != 'Maintenance'
   AND category LIKE '%gameplay%'
 GROUP BY g.game_name, q.quest_name, q.quest_id

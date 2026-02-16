@@ -11,6 +11,40 @@ python3 server.py
 
 The server exposes resources (context), prompts (analysis workflows), and SQL queries for Phase 0-3 analysis.
 
+## Standard Query Patterns
+
+The AI agent automatically runs the appropriate analysis based on your question:
+
+### When you ask about OKR / Quota
+**Triggers:** "What is the OKR?", "How are games doing against quota?", "quota attainment?"
+
+**Runs:** Phase 0 (`phase0_team_okr.sql`)
+
+**Shows:**
+- Overall quota attainment (X/Y games meeting target)
+- Tier breakdown (Ultra Boost, Boost, Core)
+- Table of games below quota
+
+### When you ask about Questers WoW / Performance
+**Triggers:** "What about questers WoW?", "Questers performance?", "Weekly performance?", "How did questers change?"
+
+**Runs:** BOTH Phase 1 AND Phase 2 (automatically)
+
+**Phase 1** (`phase1_weekly_trends.sql`):
+- Overall questers trend (last 2-3 weeks with WoW %)
+- Per-game breakdown: questers, bot %, # of quests available
+
+**Phase 2** (`phase2_decomposition.sql`):
+- Decomposition showing WHAT'S DRIVING the change
+- Buckets: New Games / Discontinued Games / Continuing Games
+- Human vs Bot split
+
+**Output includes:**
+- Overall WoW trend with % change
+- Decomposition by bucket (what's driving growth/decline)
+- Game-level details with bot % and quest counts
+- New launches and discontinued games highlighted
+
 ## Project Structure
 
 ### SQL Files (All phases consolidated)

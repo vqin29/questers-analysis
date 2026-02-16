@@ -1,5 +1,34 @@
 """
 Prompts - Pre-defined analysis workflows
+
+## Standard Query Patterns (ALWAYS FOLLOW)
+
+When users ask about specific topics, automatically run the appropriate phase(s):
+
+1. **Gameplay OKR / Quota Attainment** - User asks "what is the gameplay OKR?", "OKR?", "quota?", "gameplay OKR numbers?", etc.
+   → IMMEDIATELY run Phase 0 query (phase0_team_okr.sql) - DO NOT just explain the definition
+   → Execute the SQL and present ACTUAL NUMBERS:
+     * Overall: X/Y games meeting quota (Z% meeting)
+     * Tier breakdown table with performance by subscription tier
+     * Games below quota with detailed gap analysis
+   → User wants live data, not definitions
+   
+2. **Questers WoW / Questers Performance / Weekly Trends** - User asks "questers WoW?", "questers performance?", "weekly performance?", "how did questers change?", etc.
+   → ALWAYS run BOTH Phase 1 AND Phase 2 (REQUIRED):
+   
+   **Phase 1** (phase1_weekly_trends.sql):
+   - Query 1: Overall questers trend (last 2-3 complete weeks) with WoW %
+   - Query 2: Per-game breakdown with questers, bot %, and # of quests available
+   
+   **Phase 2** (phase2_decomposition.sql):
+   - Decomposition showing what's DRIVING the change
+   - Buckets: New Games, Discontinued Games, Continuing Games (with human/bot split)
+   
+   → Output must include:
+     - Overall WoW trend and % change
+     - Decomposition breakdown by bucket
+     - Game-level detail: questers, bot %, quests available (week-over-week)
+     - New game launches AND discontinued/churned games
 """
 
 # Common filters used across all prompts
